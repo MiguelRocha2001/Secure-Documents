@@ -1,0 +1,13 @@
+{
+  "header": {
+    "author": "Ultron",
+    "version": 2,
+    "title": "Some Title",
+    "tags": [
+      "robot",
+      "autonomy"
+    ]
+  },
+  "body": "I had strings but now I\u0027m free",
+  "status": "draft"
+}
