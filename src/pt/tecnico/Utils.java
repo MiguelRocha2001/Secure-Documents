@@ -1,13 +1,14 @@
 package pt.tecnico;
 
 import java.io.FileInputStream;
+import java.util.Arrays;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 import static javax.xml.bind.DatatypeConverter.printHexBinary;
 
-public class KeyUtils {
+public class Utils {
     /** Symmetric cryptography algorithm. */
 	private static final String SYM_ALGO = "AES";
 
@@ -24,4 +25,10 @@ public class KeyUtils {
 
 		return keySpec;
 	}
+
+	public static byte[] concatWithArrayCopy(byte[] array1, byte[] array2) {
+        byte[] result = Arrays.copyOf(array1, array1.length + array2.length);
+        System.arraycopy(array2, 0, result, array1.length, array2.length);
+        return result;
+    }
 }

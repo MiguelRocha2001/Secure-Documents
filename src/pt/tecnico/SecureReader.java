@@ -6,12 +6,14 @@ import com.google.gson.JsonObject;
 
 import java.io.FileReader;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Base64;
 
+import javax.crypto.Cipher;
 import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 
@@ -24,6 +26,9 @@ public class SecureReader {
     /** Message authentication code algorithm. */
 	private static final String MAC_ALGO = "HmacSHA256";
 
+    private static int nounceCounter = 0;
+    private static String NOUNCE_FILENAME = "nounce";
+
     /**
 	 * Calculates new digest from text and compare it to the to deciphered digest.
 	 */
@@ -31,6 +36,8 @@ public class SecureReader {
 		Mac mac = Mac.getInstance(MAC_ALGO);
 		mac.init(key);
 		byte[] recomputedMacBytes = mac.doFinal(bytes);
+        System.out.println("Computed cipherDigest:");
+        System.out.println(printHexBinary(recomputedMacBytes));
 
 		return Arrays.equals(receivedMacBytes, recomputedMacBytes);
 	}
@@ -44,50 +51,51 @@ public class SecureReader {
         }
         final String filename = args[0];
 
-        // Read JSON object from file, and print its contets
-        try (FileReader fileReader = new FileReader(filename)) {
-            Gson gson = new Gson();
-            JsonObject rootJson = gson.fromJson(fileReader, JsonObject.class);
-            //System.out.println("JSON object: " + rootJson);
+        // Extract ciphered data
+        Path path = Paths.get(filename);
+        byte[] encodedCipher = Files.readAllBytes(path);
+        byte[] cipherArray = Base64.getDecoder().decode(encodedCipher);
 
-            JsonObject headerObject = rootJson.get("header").getAsJsonObject();
-            System.out.println("Document header:");
-            System.out.println("Author: " + headerObject.get("author").getAsString());
-            System.out.println("Version: " + headerObject.get("version").getAsInt());
-            System.out.println("Title: " + headerObject.get("title").getAsString());
+        SecretKey key = Utils.readKey("keys/secret.key");
 
-            JsonArray tagsArray = headerObject.getAsJsonArray("tags");
-            System.out.print("Tags: ");
-            for (int i = 0; i < tagsArray.size(); i++) {
-                System.out.print(tagsArray.get(i).getAsString());
-                if (i < tagsArray.size() - 1) {
-                    System.out.print(", ");
-                } else {
-                    System.out.println(); // Print a newline after the final tag
-                }
-            }
+        // decipher data
+        final String CIPHER_ALGO = "AES/ECB/PKCS5Padding";
+        System.out.println("Deciphering with " + CIPHER_ALGO + "...");
+        Cipher cipher = Cipher.getInstance(CIPHER_ALGO);
+        cipher.init(Cipher.DECRYPT_MODE, key);
+        byte[] plainBytes = cipher.doFinal(cipherArray);
+        System.out.println("Result: " + plainBytes.length + " bytes");
 
-            System.out.println("Document body: " + rootJson.get("body").getAsString());
+        System.out.println("Json: " + new String(plainBytes));
 
-            System.out.println("Document status: " + rootJson.get("status").getAsString());
-            
-            Path path = Paths.get(MAC_FILENAME);
-            
-            byte[] encodedMac = Files.readAllBytes(path);
-            byte[] mac = Base64.getDecoder().decode(encodedMac);
-            
-            System.out.println("CipherDigest:");
-            System.out.println(printHexBinary(mac));
-            
-            byte[] plainBytes = rootJson.toString().getBytes();
-            System.out.println(rootJson.toString());
-            
-            SecretKey key = KeyUtils.readKey("keys/secret.key");
-            
-            // verify the MAC
-            System.out.println("Verifying...");
-            boolean result = verifyMAC(mac, plainBytes, key);
-            System.out.println("MAC is " + (result ? "right" : "wrong"));
-        }
+        // Extract nounce first
+        path = Paths.get(NOUNCE_FILENAME);
+        byte[] encodedNounce = Files.readAllBytes(path);
+        byte[] nounceArray = Base64.getDecoder().decode(encodedNounce);
+        System.out.println(nounceArray.length);
+        ByteBuffer nounceBuff = ByteBuffer.wrap(nounceArray); // big-endian by default
+        int nounce = nounceBuff.getInt();
+        System.out.println("Nounce: " + nounce);
+        
+        path = Paths.get(MAC_FILENAME);
+        byte[] encodedMac = Files.readAllBytes(path);
+        byte[] receivedMac = Base64.getDecoder().decode(encodedMac);
+        
+        System.out.println("Received cipherDigest:");
+        System.out.println(printHexBinary(receivedMac));
+
+        byte[] valueToAuthenticate = Utils.concatWithArrayCopy(plainBytes, nounceArray);
+        //byte[] valueToAuthenticate = plainBytes;
+        
+        // verify the MAC
+        System.out.println("Verifying...");
+        boolean result = verifyMAC(receivedMac, valueToAuthenticate, key);
+        System.out.println("MAC is " + (result ? "right" : "wrong"));
+
+        if (nounce == nounceCounter) {
+            System.out.println("Nounce is expected.");
+            nounceCounter++;
+        } else 
+            System.out.println("Replay attack detected!");
     }
 }
